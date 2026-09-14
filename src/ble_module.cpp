@@ -23,6 +23,8 @@ static String makeStatus(const char *eventName = nullptr) {
   s += ",\"authenticated\":" + String(authenticated ? "true" : "false");
   s += ",\"rtc_ok\":" + String(sessionRtcOk() ? "true" : "false");
   s += ",\"running\":" + String(sessionIsActive() ? "true" : "false");
+  s += ",\"relay_channel\":" + String(sessionRelayChannel());
+  s += ",\"relay_count\":" + String(RELAY_CHANNEL_COUNT);
   s += ",\"remaining_sec\":" + String(sessionRemainingSeconds());
   if (eventName) s += ",\"event\":\"" + String(eventName) + "\"";
   s += "}";
@@ -78,8 +80,6 @@ class PaymentEvents : public BLECharacteristicCallbacks {
       return;
     }
 
-    // paymentTokenAccept() is responsible for validating and starting
-    // the approved session. A true result therefore means relay/session active.
     publishStatus("session_started");
   }
 };
@@ -98,7 +98,8 @@ void bleModuleBegin() {
       BLE_INFO_CHAR_UUID, BLECharacteristic::PROPERTY_READ);
   String infoJson = "{\"device_id\":\"" + String(DEVICE_ID) +
                     "\",\"name\":\"" + String(BLE_DEVICE_NAME) +
-                    "\",\"mac\":\"" + macAddress + "\"}";
+                    "\",\"mac\":\"" + macAddress +
+                    "\",\"relay_count\":" + String(RELAY_CHANNEL_COUNT) + "}";
   info->setValue(infoJson.c_str());
 
   BLECharacteristic *auth = service->createCharacteristic(
