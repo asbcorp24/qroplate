@@ -12,7 +12,7 @@ class DashboardController extends Controller
 {
     public function index(): View
     {
-        $isSuper = (bool) session('admin_is_super', false);
+        $isSuper = session('admin_role') === 'super';
         $adminId = session('admin_id');
 
         $devices = Device::query()
