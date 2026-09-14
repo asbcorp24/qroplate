@@ -22,7 +22,12 @@
 #define RTC_SDA_PIN   21
 #define RTC_SCL_PIN   22
 
-#define RELAY_PIN     27
+// Four independent relay outputs.
+#define RELAY1_PIN 25
+#define RELAY2_PIN 26
+#define RELAY3_PIN 27
+#define RELAY4_PIN 33
+#define RELAY_CHANNEL_COUNT 4
 #define RELAY_ACTIVE_LEVEL HIGH
 #define RELAY_IDLE_LEVEL   LOW
 
