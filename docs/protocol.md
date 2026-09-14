@@ -16,19 +16,101 @@ Fields:
 - `mac` - BLE MAC address used by Flutter to find the correct ESP32.
 - `code` - local BLE access code for this physical unit.
 
-## 2. BLE connection
+The QR must NOT contain the service title, description, tariff, image, button text or screen layout. These are controlled by the server so they can be changed without reflashing ESP32 or replacing the QR code.
+
+## 2. Server-driven device profile
+
+Every physical ESP32 is linked in the admin panel to a server-side device profile describing what the device controls and how the Flutter application should present it.
+
+Example server response for `GET /api/devices/DEV-000001`:
+
+```json
+{
+  "device_id": "DEV-000001",
+  "enabled": true,
+  "type": "washing_machine",
+  "profile_id": "PROFILE-WASH-01",
+  "title": "Стиральная машина №1",
+  "subtitle": "Прачечная, 1 этаж",
+  "description": "Выберите время работы и оплатите услугу",
+  "image_url": "https://server.example/storage/devices/washing-machine.png",
+  "theme": {
+    "accent": "#1565C0",
+    "icon": "washing_machine",
+    "layout": "timer"
+  },
+  "controls": {
+    "mode": "timed_relay",
+    "show_duration": true,
+    "show_price": true,
+    "button_text": "Оплатить и запустить"
+  },
+  "tariffs": [
+    {
+      "id": "TARIFF-15",
+      "title": "15 минут",
+      "duration_sec": 900,
+      "price": 100.00,
+      "currency": "RUB"
+    },
+    {
+      "id": "TARIFF-30",
+      "title": "30 минут",
+      "duration_sec": 1800,
+      "price": 180.00,
+      "currency": "RUB"
+    }
+  ]
+}
+```
+
+This allows the same ESP32 firmware and the same Flutter application to be used for different equipment. The administrator changes the assignment on the server and the application automatically shows the correct screen after scanning the QR.
+
+Typical device types may include:
+
+- washing machine
+- dryer
+- shower
+- sauna
+- charging station
+- massage chair
+- locker
+- water dispenser
+- attraction/game machine
+- parking barrier
+- arbitrary timed relay equipment
+
+The Flutter UI must primarily be driven by server fields rather than hardcoded per physical device.
+
+## 3. Application flow after QR scan
 
 1. Flutter scans the QR.
-2. Flutter finds the BLE device by MAC/device id.
-3. Flutter connects to the ESP32.
-4. Flutter writes the QR access code to AUTH.
-5. ESP32 answers with `auth_ok` or `auth_failed`.
-6. AUTH only opens access to the session command characteristic. It never starts the relay.
+2. Flutter extracts `device_id`, BLE MAC and local BLE access code.
+3. Flutter requests the device profile from the backend using `device_id`.
+4. Backend returns the current device type, text, image, tariffs, controls and visual configuration.
+5. Flutter builds the corresponding payment screen.
+6. Flutter finds and connects to the ESP32 over BLE.
+7. Flutter authenticates locally using the QR access code.
+8. User selects a server-provided tariff or allowed duration.
+9. Flutter creates a payment/order on the server.
+10. After successful payment, the server creates a one-time signed session authorization.
+11. Flutter forwards that session command to ESP32 over BLE.
+12. ESP32 validates the command and starts the relay only when valid.
 
-## 3. Payment flow
+If the administrator changes the device assignment, title, price, image or available tariffs, the next QR scan immediately uses the new server configuration. The physical QR and ESP32 firmware do not need to change as long as the same `device_id` remains assigned.
+
+## 4. BLE connection
+
+1. Flutter finds the BLE device by MAC/device id.
+2. Flutter connects to the ESP32.
+3. Flutter writes the QR access code to AUTH.
+4. ESP32 answers with `auth_ok` or `auth_failed`.
+5. AUTH only opens access to the session command characteristic. It never starts the relay.
+
+## 5. Payment flow
 
 1. Flutter requests current tariff data from the web API using `device_id`.
-2. User chooses the required operating time.
+2. User chooses the required operating time/tariff permitted by the device profile.
 3. Flutter creates an order on the server.
 4. Payment is completed through the selected payment provider.
 5. Only the server confirms successful payment.
@@ -37,7 +119,7 @@ Fields:
 8. ESP32 validates the command.
 9. Only after successful validation does ESP32 start the relay.
 
-## 4. Paid session command
+## 6. Paid session command
 
 Logical JSON representation:
 
@@ -47,6 +129,7 @@ Logical JSON representation:
   "device_id": "DEV-000001",
   "payment_id": "PAY-20260914-000123",
   "session_id": "SES-20260914-000123",
+  "tariff_id": "TARIFF-15",
   "duration_sec": 900,
   "issued_at": 1789360000,
   "expires_at": 1789360120,
@@ -61,9 +144,10 @@ Meaning:
 - `device_id` - device for which the command was issued.
 - `payment_id` - confirmed payment identifier.
 - `session_id` - unique operating session identifier.
+- `tariff_id` - server tariff/profile option that was paid for.
 - `duration_sec` - paid relay operating time.
 - `issued_at` - server issue time in Unix seconds.
-- `expires_at` - short validity window for delivering the command to ESP32.
+- `expires_at` - latest time at which ESP32 may accept the start command.
 - `nonce` - unique one-time value preventing replay.
 - `token` - server-generated authenticator covering all command fields.
 
@@ -73,6 +157,7 @@ The token must cover at least:
 device_id
 payment_id
 session_id
+tariff_id
 duration_sec
 issued_at
 expires_at
@@ -81,7 +166,7 @@ nonce
 
 Changing any of these values must make validation fail.
 
-## 5. ESP32 validation rules
+## 7. ESP32 validation rules
 
 Before enabling the relay ESP32 checks all of the following:
 
@@ -98,12 +183,15 @@ Before enabling the relay ESP32 checks all of the following:
 
 Any failed check leaves the relay OFF.
 
-## 6. Data stored by ESP32
+ESP32 does not need to know the product title, image, price or UI layout. Those belong to the backend/Flutter layer. ESP32 only enforces device identity, authorization and timed relay operation.
+
+## 8. Data stored by ESP32
 
 For an accepted session ESP32 stores in NVS:
 
 - `session_id`
 - `payment_id`
+- `tariff_id` when useful for diagnostics
 - `nonce`
 - `duration_sec`
 - `started_at`
@@ -111,7 +199,7 @@ For an accepted session ESP32 stores in NVS:
 
 This allows the paid session to survive ESP32 reboot. RTC is the time authority while the device is offline from the phone.
 
-## 7. ESP32 -> Flutter status
+## 9. ESP32 -> Flutter status
 
 STATUS characteristic should return/notify data equivalent to:
 
@@ -143,7 +231,7 @@ Expected events include:
 - `session_finished`
 - `rtc_error`
 
-## 8. Flutter -> server telemetry
+## 10. Flutter -> server telemetry
 
 Flutter should report device/session events back to the API whenever internet access is available:
 
@@ -159,7 +247,29 @@ Flutter should report device/session events back to the API whenever internet ac
 
 The server must treat ESP acknowledgement as device telemetry, while payment status always comes from the payment provider/server side.
 
-## 9. Important security separation
+## 11. Admin panel device assignment
+
+The admin panel is the source of truth for what each physical unit represents.
+
+For every device the administrator should be able to configure at least:
+
+- device name
+- device type/profile
+- location
+- title/subtitle/description
+- image/icon
+- enabled/disabled state
+- tariff list
+- fixed durations or user-selectable duration rules
+- min/max duration when variable time is allowed
+- button labels
+- theme/accent/layout preset
+- relay/session limits
+- maintenance/offline message
+
+A profile can be reused by many devices. For example, ten washing machines may use the same `washing_machine` profile while each has its own `device_id`, location and optional tariff override.
+
+## 12. Important security separation
 
 There are three separate credentials/concepts:
 
