@@ -18,25 +18,20 @@ static GxEPD2_BW<GxEPD2_154, GxEPD2_154::HEIGHT> display(
 #endif
 
 static String currentQr;
-static bool lastRunning = false;
 static uint32_t lastRefreshMs = 0;
 
-static void centered(const String &text, int16_t y) {
-  int16_t x1, y1;
-  uint16_t w, h;
-  display.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
-  const int16_t x = max<int16_t>(0, (display.width() - (int16_t)w) / 2);
-  display.setCursor(x, y);
-  display.print(text);
-}
-
-static String formatTime(uint32_t seconds) {
+static String compactTime(uint32_t seconds) {
   const uint32_t h = seconds / 3600;
   const uint32_t m = (seconds % 3600) / 60;
   const uint32_t s = seconds % 60;
-  char out[16];
-  snprintf(out, sizeof(out), "%02lu:%02lu:%02lu",
-           (unsigned long)h, (unsigned long)m, (unsigned long)s);
+  char out[12];
+  if (h > 0) {
+    snprintf(out, sizeof(out), "%luh%02lum",
+             (unsigned long)h, (unsigned long)m);
+  } else {
+    snprintf(out, sizeof(out), "%02lu:%02lu",
+             (unsigned long)m, (unsigned long)s);
+  }
   return String(out);
 }
 
@@ -47,13 +42,13 @@ void displayModuleBegin() {
   display.setTextColor(GxEPD_BLACK);
 }
 
-void displayModuleShowQr(const String &payload) {
-  currentQr = payload;
+static void renderDashboard() {
+  if (currentQr.length() == 0) return;
 
   QRCode qr;
   constexpr uint8_t version = 6;
   uint8_t data[qrcode_getBufferSize(version)];
-  qrcode_initText(&qr, data, version, ECC_LOW, payload.c_str());
+  qrcode_initText(&qr, data, version, ECC_LOW, currentQr.c_str());
 
   display.setFullWindow();
   display.firstPage();
@@ -62,7 +57,9 @@ void displayModuleShowQr(const String &payload) {
     display.setTextColor(GxEPD_BLACK);
     display.setTextSize(1);
 
-    const int scale = 4;
+    // Keep the QR permanently visible so another user can scan the same
+    // controller while other relay channels are already running.
+    const int scale = 3;
     const int sizePx = qr.size * scale;
     const int x0 = (display.width() - sizePx) / 2;
     const int y0 = 2;
@@ -76,52 +73,36 @@ void displayModuleShowQr(const String &payload) {
       }
     }
 
-    centered(String(DEVICE_ID), 195);
-  } while (display.nextPage());
-
-  lastRunning = false;
-  lastRefreshMs = millis();
-}
-
-static void showChannels() {
-  display.setFullWindow();
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-    display.setTextSize(1);
-    centered(String(DEVICE_ID), 14);
-    centered("ACTIVE CHANNELS", 30);
-
+    const int16_t statusTop = y0 + sizePx + 5;
     for (uint8_t ch = 1; ch <= RELAY_CHANNEL_COUNT; ++ch) {
-      const int16_t y = 62 + (ch - 1) * 32;
-      display.setCursor(12, y);
+      const int16_t y = statusTop + (ch - 1) * 16;
+      display.setCursor(10, y);
       display.print("R");
       display.print(ch);
-      display.print(" ");
+      display.print(": ");
       if (relayChannelActive(ch)) {
-        display.print(formatTime(relayChannelRemaining(ch)));
+        display.print(compactTime(relayChannelRemaining(ch)));
       } else {
         display.print("FREE");
       }
     }
-
-    centered("SCAN QR FOR SERVICES", 194);
   } while (display.nextPage());
 
-  lastRunning = relayActiveCount() > 0;
   lastRefreshMs = millis();
 }
 
+void displayModuleShowQr(const String &payload) {
+  currentQr = payload;
+  renderDashboard();
+}
+
 void displayModuleLoop() {
-  const bool running = relayActiveCount() > 0;
+  if (currentQr.length() == 0) return;
 
-  if (running && (!lastRunning || millis() - lastRefreshMs >= DISPLAY_REFRESH_PERIOD_MS)) {
-    showChannels();
-    return;
-  }
-
-  if (!running && lastRunning && currentQr.length()) {
-    displayModuleShowQr(currentQr);
+  // Refresh while channels run so remaining time stays useful. When all
+  // channels are free the e-paper needs no periodic refresh.
+  if (relayActiveCount() > 0 &&
+      millis() - lastRefreshMs >= DISPLAY_REFRESH_PERIOD_MS) {
+    renderDashboard();
   }
 }
