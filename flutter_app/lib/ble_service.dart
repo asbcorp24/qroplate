@@ -16,8 +16,8 @@ class QroBleService {
   StreamSubscription<List<int>>? _statusSub;
   String? _deviceBleId;
 
-  final _status = StreamController<BleStatus>.broadcast();
-  Stream<BleStatus> get statusStream => _status.stream;
+  final _status = StreamController<DeviceBleStatus>.broadcast();
+  Stream<DeviceBleStatus> get statusStream => _status.stream;
   String? get connectedBleId => _deviceBleId;
 
   QualifiedCharacteristic _char(Uuid id) {
@@ -29,8 +29,7 @@ class QroBleService {
   Future<void> connectAndAuthenticate(QrDevicePayload qr, {Duration timeout = const Duration(seconds: 15)}) async {
     await disconnect();
 
-    final ready = await ble.statusStream.firstWhere((s) => s == BleStatus.ready).timeout(timeout);
-    if (ready != BleStatus.ready) throw StateError('Bluetooth не готов');
+    await ble.statusStream.firstWhere((s) => s == BleStatus.ready).timeout(timeout);
 
     final target = await ble
         .scanForDevices(withServices: [serviceUuid], scanMode: ScanMode.lowLatency)
@@ -77,7 +76,7 @@ class QroBleService {
     _statusSub = ble.subscribeToCharacteristic(_char(statusUuid)).listen((bytes) {
       try {
         final json = Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map);
-        _status.add(BleStatus(json));
+        _status.add(DeviceBleStatus(json));
       } catch (_) {}
     });
 
@@ -99,9 +98,9 @@ class QroBleService {
     await ble.writeCharacteristicWithResponse(_char(sessionUuid), value: data);
   }
 
-  Future<BleStatus> readStatus() async {
+  Future<DeviceBleStatus> readStatus() async {
     final bytes = await ble.readCharacteristic(_char(statusUuid));
-    return BleStatus(Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map));
+    return DeviceBleStatus(Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map));
   }
 
   Future<void> disconnect() async {
