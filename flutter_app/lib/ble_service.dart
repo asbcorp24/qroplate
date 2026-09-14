@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'models.dart';
+import 'permissions.dart';
 
 class QroBleService {
   final FlutterReactiveBle ble = FlutterReactiveBle();
@@ -28,7 +29,7 @@ class QroBleService {
 
   Future<void> connectAndAuthenticate(QrDevicePayload qr, {Duration timeout = const Duration(seconds: 15)}) async {
     await disconnect();
-
+    await ensureBlePermissions();
     await ble.statusStream.firstWhere((s) => s == BleStatus.ready).timeout(timeout);
 
     final target = await ble
