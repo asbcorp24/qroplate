@@ -15,6 +15,9 @@
             <div class="navbar-nav me-auto">
                 <a class="nav-link" href="{{ route('admin.dashboard') }}">Дашборд</a>
                 <a class="nav-link" href="{{ route('admin.devices.index') }}">Приборы</a>
+                <a class="nav-link" href="{{ route('admin.payments.index') }}">Платежи</a>
+                <a class="nav-link" href="{{ route('admin.sessions.index') }}">Сессии</a>
+                <a class="nav-link" href="{{ route('admin.reports.index') }}">Отчёты</a>
                 @if(session('admin_role') === 'super')
                     <a class="nav-link" href="{{ route('admin.admins.index') }}">Администраторы</a>
                 @endif
