@@ -7,6 +7,7 @@
 #include "config.h"
 #include "ble_module.h"
 #include "session.h"
+#include "payment_token.h"
 
 static BLEServer *serverPtr = nullptr;
 static BLECharacteristic *statusChar = nullptr;
@@ -61,17 +62,25 @@ class AuthEvents : public BLECharacteristicCallbacks {
 };
 
 class PaymentEvents : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *) override {
+  void onWrite(BLECharacteristic *characteristic) override {
     if (!authenticated) {
       publishStatus("not_authenticated");
       return;
     }
 
-    // Production fail-closed behavior:
-    // never start a relay from a plain duration value.
-    // This characteristic accepts only a server-approved session package.
-    // Validation is connected in the payment token module.
-    publishStatus("session_token_required");
+    String package = String(characteristic->getValue().c_str());
+    package.trim();
+
+    String validationResult;
+    if (!paymentTokenAccept(package, validationResult)) {
+      Serial.println("Session package rejected: " + validationResult);
+      publishStatus("session_rejected");
+      return;
+    }
+
+    // paymentTokenAccept() is responsible for validating and starting
+    // the approved session. A true result therefore means relay/session active.
+    publishStatus("session_started");
   }
 };
 
