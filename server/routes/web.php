@@ -34,6 +34,7 @@ Route::middleware(AdminSessionAuth::class)->prefix('admin')->name('admin.')->gro
     Route::get('/sessions.csv', [SessionController::class, 'csv'])->name('sessions.csv');
 
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('/reports.csv', [ReportController::class, 'csv'])->name('reports.csv');
 
     Route::get('/admins', [UserAdminController::class, 'index'])->name('admins.index');
     Route::post('/admins', [UserAdminController::class, 'store'])->name('admins.store');
