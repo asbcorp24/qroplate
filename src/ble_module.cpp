@@ -16,6 +16,9 @@ static bool authenticated = false;
 static String macAddress;
 static String qrPayload;
 static uint32_t lastNotifyMs = 0;
+static String sessionRxBuffer;
+static uint32_t sessionRxStartedMs = 0;
+static const size_t SESSION_RX_MAX = 1024;
 
 static String makeStatus(const char *eventName = nullptr) {
   String s = "{\"device_id\":\"" + String(DEVICE_ID) + "\"";
@@ -46,22 +49,47 @@ static String makeStatus(const char *eventName = nullptr) {
 
 static void publishStatus(const char *eventName = nullptr) {
   if (!statusChar) return;
-  const String s = makeStatus(eventName);
-  statusChar->setValue(s.c_str());
-  if (connected) statusChar->notify();
-  Serial.println(s);
+
+  const String full = makeStatus(eventName);
+  statusChar->setValue(full.c_str());
+
+  if (connected) {
+    String notice = "{\"event\":\"" + String(eventName ? eventName : "status_changed") + "\"}";
+    statusChar->setValue(notice.c_str());
+    statusChar->notify();
+    statusChar->setValue(full.c_str());
+  }
+
+  Serial.println(full);
+}
+
+static void clearSessionRx() {
+  sessionRxBuffer = "";
+  sessionRxStartedMs = 0;
+}
+
+static void processSessionPackage(const String &package) {
+  String validationResult;
+  if (!paymentTokenAccept(package, validationResult)) {
+    Serial.println("Session package rejected: " + validationResult);
+    publishStatus("session_rejected");
+    return;
+  }
+  publishStatus("session_started");
 }
 
 class ServerEvents : public BLEServerCallbacks {
   void onConnect(BLEServer *) override {
     connected = true;
     authenticated = false;
+    clearSessionRx();
     publishStatus("connected");
   }
 
   void onDisconnect(BLEServer *server) override {
     connected = false;
     authenticated = false;
+    clearSessionRx();
     server->startAdvertising();
     Serial.println("BLE disconnected, advertising restarted");
   }
@@ -83,22 +111,58 @@ class PaymentEvents : public BLECharacteristicCallbacks {
       return;
     }
 
-    String package = String(characteristic->getValue().c_str());
-    package.trim();
+    String value = String(characteristic->getValue().c_str());
 
-    String validationResult;
-    if (!paymentTokenAccept(package, validationResult)) {
-      Serial.println("Session package rejected: " + validationResult);
-      publishStatus("session_rejected");
+    // MTU-safe framing:
+    // !          begin/reset package
+    // +<data>    append a small chunk
+    // .          validate complete package
+    // { ... }    direct package is also accepted for bench clients
+    if (value == "!") {
+      clearSessionRx();
+      sessionRxStartedMs = millis();
       return;
     }
 
-    publishStatus("session_started");
+    if (value.startsWith("+")) {
+      if (sessionRxStartedMs == 0 || millis() - sessionRxStartedMs > 10000) {
+        clearSessionRx();
+        publishStatus("session_rejected");
+        return;
+      }
+      if (sessionRxBuffer.length() + value.length() - 1 > SESSION_RX_MAX) {
+        clearSessionRx();
+        publishStatus("session_rejected");
+        return;
+      }
+      sessionRxBuffer += value.substring(1);
+      return;
+    }
+
+    if (value == ".") {
+      if (sessionRxBuffer.length() == 0) {
+        publishStatus("session_rejected");
+        return;
+      }
+      const String package = sessionRxBuffer;
+      clearSessionRx();
+      processSessionPackage(package);
+      return;
+    }
+
+    value.trim();
+    if (value.startsWith("{")) {
+      processSessionPackage(value);
+      return;
+    }
+
+    publishStatus("session_rejected");
   }
 };
 
 void bleModuleBegin() {
   BLEDevice::init(BLE_DEVICE_NAME);
+  BLEDevice::setMTU(517);
   macAddress = String(BLEDevice::getAddress().toString().c_str());
   macAddress.toUpperCase();
 
@@ -144,6 +208,9 @@ void bleModuleBegin() {
 
 void bleModuleLoop() {
   const uint32_t now = millis();
+  if (sessionRxStartedMs != 0 && now - sessionRxStartedMs > 10000) {
+    clearSessionRx();
+  }
   if (now - lastNotifyMs >= STATUS_NOTIFY_PERIOD_MS) {
     lastNotifyMs = now;
     publishStatus();
