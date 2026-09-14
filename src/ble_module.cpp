@@ -6,7 +6,7 @@
 
 #include "config.h"
 #include "ble_module.h"
-#include "session.h"
+#include "relay_sessions.h"
 #include "payment_token.h"
 
 static BLEServer *serverPtr = nullptr;
@@ -21,11 +21,24 @@ static String makeStatus(const char *eventName = nullptr) {
   String s = "{\"device_id\":\"" + String(DEVICE_ID) + "\"";
   s += ",\"connected\":" + String(connected ? "true" : "false");
   s += ",\"authenticated\":" + String(authenticated ? "true" : "false");
-  s += ",\"rtc_ok\":" + String(sessionRtcOk() ? "true" : "false");
-  s += ",\"running\":" + String(sessionIsActive() ? "true" : "false");
-  s += ",\"relay_channel\":" + String(sessionRelayChannel());
-  s += ",\"relay_count\":" + String(RELAY_CHANNEL_COUNT);
-  s += ",\"remaining_sec\":" + String(sessionRemainingSeconds());
+  s += ",\"active_count\":" + String(relayActiveCount());
+  s += ",\"channels\":[";
+
+  for (uint8_t ch = 1; ch <= RELAY_CHANNEL_COUNT; ++ch) {
+    if (ch > 1) s += ",";
+    const bool active = relayChannelActive(ch);
+    s += "{\"channel\":" + String(ch);
+    s += ",\"state\":\"" + String(active ? "running" : "free") + "\"";
+    s += ",\"running\":" + String(active ? "true" : "false");
+    s += ",\"remaining_sec\":" + String(relayChannelRemaining(ch));
+    s += ",\"end_epoch\":" + String(relayChannelEndEpoch(ch));
+    s += ",\"duration_sec\":" + String(relayChannelDuration(ch));
+    s += ",\"session_id\":\"" + relayChannelSessionId(ch) + "\"";
+    s += ",\"payment_id\":\"" + relayChannelPaymentId(ch) + "\"";
+    s += "}";
+  }
+
+  s += "]";
   if (eventName) s += ",\"event\":\"" + String(eventName) + "\"";
   s += "}";
   return s;
@@ -99,7 +112,7 @@ void bleModuleBegin() {
   String infoJson = "{\"device_id\":\"" + String(DEVICE_ID) +
                     "\",\"name\":\"" + String(BLE_DEVICE_NAME) +
                     "\",\"mac\":\"" + macAddress +
-                    "\",\"relay_count\":" + String(RELAY_CHANNEL_COUNT) + "}";
+                    "\",\"relay_channels\":" + String(RELAY_CHANNEL_COUNT) + "}";
   info->setValue(infoJson.c_str());
 
   BLECharacteristic *auth = service->createCharacteristic(
