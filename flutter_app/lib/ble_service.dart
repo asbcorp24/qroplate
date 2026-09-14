@@ -16,6 +16,7 @@ class QroBleService {
   StreamSubscription<ConnectionStateUpdate>? _connection;
   StreamSubscription<List<int>>? _statusSub;
   String? _deviceBleId;
+  bool _readingStatus = false;
 
   final _status = StreamController<DeviceBleStatus>.broadcast();
   Stream<DeviceBleStatus> get statusStream => _status.stream;
@@ -32,11 +33,14 @@ class QroBleService {
     await ensureBlePermissions();
     await ble.statusStream.firstWhere((s) => s == BleStatus.ready).timeout(timeout);
 
+    final expectedName = 'QRPAY-${qr.deviceId.replaceFirst('DEV-', '')}'.toUpperCase();
     final target = await ble
         .scanForDevices(withServices: [serviceUuid], scanMode: ScanMode.lowLatency)
         .firstWhere((d) {
-          if (qr.mac.isEmpty) return true;
-          return d.id.toUpperCase() == qr.mac || d.name.startsWith('QRPAY-');
+          final id = d.id.toUpperCase();
+          final name = d.name.toUpperCase();
+          if (qr.mac.isNotEmpty && id == qr.mac) return true;
+          return name == expectedName;
         })
         .timeout(timeout);
 
@@ -74,10 +78,13 @@ class QroBleService {
       throw StateError('Подключён другой прибор: ${info['device_id']}');
     }
 
-    _statusSub = ble.subscribeToCharacteristic(_char(statusUuid)).listen((bytes) {
+    _statusSub = ble.subscribeToCharacteristic(_char(statusUuid)).listen((bytes) async {
       try {
-        final json = Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map);
-        _status.add(DeviceBleStatus(json));
+        final notice = Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map);
+        final event = notice['event']?.toString();
+        final full = await _readFullStatus();
+        if (event != null && event.isNotEmpty) full.json['event'] = event;
+        _status.add(full);
       } catch (_) {}
     });
 
@@ -95,14 +102,31 @@ class QroBleService {
   }
 
   Future<void> sendSessionCommand(Map<String, dynamic> command) async {
-    final data = utf8.encode(jsonEncode(command));
-    await ble.writeCharacteristicWithResponse(_char(sessionUuid), value: data);
+    final json = jsonEncode(command);
+    await ble.writeCharacteristicWithResponse(_char(sessionUuid), value: utf8.encode('!'));
+    const chunkSize = 16;
+    for (var offset = 0; offset < json.length; offset += chunkSize) {
+      final end = (offset + chunkSize < json.length) ? offset + chunkSize : json.length;
+      final chunk = json.substring(offset, end);
+      await ble.writeCharacteristicWithResponse(_char(sessionUuid), value: utf8.encode('+$chunk'));
+    }
+    await ble.writeCharacteristicWithResponse(_char(sessionUuid), value: utf8.encode('.'));
   }
 
-  Future<DeviceBleStatus> readStatus() async {
-    final bytes = await ble.readCharacteristic(_char(statusUuid));
-    return DeviceBleStatus(Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map));
+  Future<DeviceBleStatus> _readFullStatus() async {
+    if (_readingStatus) {
+      await Future.delayed(const Duration(milliseconds: 80));
+    }
+    _readingStatus = true;
+    try {
+      final bytes = await ble.readCharacteristic(_char(statusUuid));
+      return DeviceBleStatus(Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map));
+    } finally {
+      _readingStatus = false;
+    }
   }
+
+  Future<DeviceBleStatus> readStatus() => _readFullStatus();
 
   Future<void> disconnect() async {
     await _statusSub?.cancel();
