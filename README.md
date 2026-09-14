@@ -119,8 +119,12 @@ The firmware already provides:
 5. Relay control.
 6. Session end time stored in NVS so an active session survives ESP32 reboot.
 7. Remaining-time display while a session is running.
+8. Plain-duration BLE starts are disabled.
+9. PAYMENT/SESSION writes are routed through a dedicated token validator.
+10. The validator currently fails closed until cryptographic verification is configured.
+11. `SessionRequest` JSON model/parser is present for the paid-session packet.
 
-The current `BLE_PAYMENT_CHAR_UUID` handler still accepts a plain duration for bench testing. It will be replaced by the signed session packet described above before real payment operation.
+Therefore the current firmware cannot start a new paid session from an unverified BLE packet. This is intentional.
 
 ## Hardware assumed
 
@@ -186,7 +190,23 @@ Characteristics:
 | PAYMENT/SESSION | `0003` | Write | signed paid-session packet |
 | STATUS | `0004` | Read/Notify | state, session and remaining seconds |
 
-During bench testing characteristic `0003` currently accepts a decimal number of seconds. This is temporary and must not be used with real payments.
+Characteristic `0003` no longer accepts a decimal duration as a start command. A server-approved session packet is required.
+
+## SessionRequest parser
+
+`include/session_request.h` and `src/session_request.cpp` define and parse:
+
+- protocol version
+- device id
+- payment/operation id
+- session id
+- duration
+- issue time
+- expiration time
+- nonce
+- server proof/token
+
+Malformed or incomplete JSON is rejected before authorization is attempted.
 
 ## Session data stored by ESP32
 
@@ -236,15 +256,18 @@ pio device monitor -b 115200
 
 The project currently targets `esp32dev`. If the exact MH-ET LIVE ESP32 board needs a different PlatformIO board id, change only the `board =` line in `platformio.ini`.
 
+Dependencies include GxEPD2, RTClib, QRCode and ArduinoJson.
+
 ## RTC behavior
 
 On first boot after RTC battery loss, the firmware initializes DS3231 from firmware build time. Flutter/admin synchronization with trusted server time will be added for production.
 
 ## Planned implementation order
 
-1. Replace plain-duration BLE command with signed session packet parsing and verification.
-2. Store `session_id`, `payment_id` and anti-replay nonce information in NVS.
-3. Extend BLE STATUS with complete session operation data.
-4. Flutter app: QR scanner, BLE authorization, backend API, payment and session UI.
-5. Laravel API/admin: devices, tariffs, locations, payments, sessions and provisioning.
-6. Device diagnostics and OTA update.
+1. Connect `SessionRequest` parsing to the BLE PAYMENT/SESSION handler.
+2. Add cryptographic verification of the server-approved session package.
+3. Store `session_id`, `payment_id` and anti-replay nonce information in NVS.
+4. Extend BLE STATUS with complete session operation data.
+5. Flutter app: QR scanner, BLE authorization, backend API, payment and session UI.
+6. Laravel API/admin: devices, tariffs, locations, payments, sessions and provisioning.
+7. Device diagnostics and OTA update.
