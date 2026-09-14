@@ -1,14 +1,14 @@
 #include <Arduino.h>
 #include "ble_module.h"
 #include "display_module.h"
-#include "session.h"
+#include "relay_sessions.h"
 
 void setup() {
   Serial.begin(115200);
   delay(250);
   Serial.println("QROplate ESP32 starting");
 
-  sessionBegin();
+  relaySessionsBegin();
   bleModuleBegin();
   displayModuleBegin();
   displayModuleShowQr(bleModuleQrPayload());
@@ -17,7 +17,7 @@ void setup() {
 }
 
 void loop() {
-  sessionLoop();
+  relaySessionsLoop();
   bleModuleLoop();
   displayModuleLoop();
   delay(20);
