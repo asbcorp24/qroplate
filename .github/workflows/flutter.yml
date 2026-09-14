@@ -1,0 +1,25 @@
+name: Flutter app
+
+on:
+  push:
+    paths:
+      - 'flutter_app/**'
+      - '.github/workflows/flutter.yml'
+  pull_request:
+    paths:
+      - 'flutter_app/**'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
