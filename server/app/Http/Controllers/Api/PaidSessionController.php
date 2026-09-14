@@ -4,11 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\DeviceSession;
+use App\Services\HmacSessionCommandSigner;
 use Illuminate\Http\JsonResponse;
 
 class PaidSessionController extends Controller
 {
-    public function show(string $sessionId): JsonResponse
+    public function show(string $sessionId, HmacSessionCommandSigner $signer): JsonResponse
     {
         $session = DeviceSession::with(['channel.device','payment.tariff'])
             ->where('session_id', $sessionId)->firstOrFail();
@@ -17,10 +18,14 @@ class PaidSessionController extends Controller
             return response()->json(['error'=>'payment_not_paid'], 409);
         }
 
+        if ((string) config('qroplate.device_token_secret') === '') {
+            return response()->json(['error'=>'device_token_secret_not_configured'], 503);
+        }
+
         $issuedAt = now()->timestamp;
         $expiresAt = $issuedAt + (int) config('qroplate.session_command_ttl_seconds', 120);
 
-        return response()->json([
+        $payload = [
             'version'=>1,
             'device_id'=>$session->channel->device->device_id,
             'payment_id'=>$session->payment->payment_id,
@@ -31,8 +36,9 @@ class PaidSessionController extends Controller
             'issued_at'=>$issuedAt,
             'expires_at'=>$expiresAt,
             'nonce'=>$session->nonce,
-            'token'=>null,
-            'token_status'=>'signer_not_configured',
-        ], 503);
+        ];
+
+        $payload['token'] = $signer->sign($payload);
+        return response()->json($payload);
     }
 }
