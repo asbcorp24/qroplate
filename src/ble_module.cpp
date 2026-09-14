@@ -60,24 +60,18 @@ class AuthEvents : public BLECharacteristicCallbacks {
   }
 };
 
-class DurationEvents : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *characteristic) override {
+class PaymentEvents : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *) override {
     if (!authenticated) {
       publishStatus("not_authenticated");
       return;
     }
 
-    String value = String(characteristic->getValue().c_str());
-    value.trim();
-    const uint32_t seconds = strtoul(value.c_str(), nullptr, 10);
-    if (seconds == 0 || seconds > MAX_SESSION_SECONDS) {
-      publishStatus("bad_duration");
-      return;
-    }
-
-    String nonce = String((uint32_t)esp_random(), HEX) + String((uint32_t)millis(), HEX);
-    if (sessionStart(seconds, nonce)) publishStatus("session_started");
-    else publishStatus("session_rejected");
+    // Production fail-closed behavior:
+    // never start a relay from a plain duration value.
+    // This characteristic accepts only a server-approved session package.
+    // Validation is connected in the payment token module.
+    publishStatus("session_token_required");
   }
 };
 
@@ -102,9 +96,9 @@ void bleModuleBegin() {
       BLE_AUTH_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
   auth->setCallbacks(new AuthEvents());
 
-  BLECharacteristic *duration = service->createCharacteristic(
+  BLECharacteristic *payment = service->createCharacteristic(
       BLE_PAYMENT_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-  duration->setCallbacks(new DurationEvents());
+  payment->setCallbacks(new PaymentEvents());
 
   statusChar = service->createCharacteristic(
       BLE_STATUS_CHAR_UUID,
