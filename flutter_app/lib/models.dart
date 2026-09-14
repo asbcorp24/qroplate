@@ -122,9 +122,9 @@ class PaymentState {
   factory PaymentState.fromJson(Map<String, dynamic> j) => PaymentState(paymentId: '${j['payment_id']}', status: '${j['status']}', sessionId: j['session_id']?.toString());
 }
 
-class BleStatus {
+class DeviceBleStatus {
   final Map<String, dynamic> json;
-  const BleStatus(this.json);
+  const DeviceBleStatus(this.json);
   List<Map<String, dynamic>> get channels => ((json['channels'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   String encode() => jsonEncode(json);
 }
