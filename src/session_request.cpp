@@ -16,6 +16,7 @@ bool parseSessionRequest(const String &json, SessionRequest &out, String &error)
   out.deviceId = String((const char *)(doc["device_id"] | ""));
   out.operationId = String((const char *)(doc["payment_id"] | ""));
   out.sessionId = String((const char *)(doc["session_id"] | ""));
+  out.tariffId = String((const char *)(doc["tariff_id"] | ""));
   out.relayChannel = doc["relay_channel"] | 0;
   out.durationSec = doc["duration_sec"] | 0;
   out.issuedAt = doc["issued_at"] | 0;
@@ -30,6 +31,7 @@ bool parseSessionRequest(const String &json, SessionRequest &out, String &error)
   if (out.deviceId.length() == 0 ||
       out.operationId.length() == 0 ||
       out.sessionId.length() == 0 ||
+      out.tariffId.length() == 0 ||
       out.relayChannel < 1 || out.relayChannel > RELAY_CHANNEL_COUNT ||
       out.durationSec == 0 ||
       out.issuedAt == 0 ||
