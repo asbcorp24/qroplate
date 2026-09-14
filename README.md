@@ -1,40 +1,37 @@
 # QROplate ESP32 firmware
 
-ESP32 controller for paid timed equipment access.
+ESP32 4-channel controller for paid timed equipment access.
 
-## System architecture
+## Main idea
 
-The QR password and the payment authorization are two different security layers.
+One physical ESP32 has one QR code and four independent relay outputs. The QR identifies the controller. After scanning it, Flutter asks the server what this controller currently represents and which paid actions/services are available.
 
-### 1. QR / BLE access
+The server decides which relay channel belongs to each action. ESP32 does not store service titles, prices, images or UI layouts.
 
-ESP32 shows a QR code on the 1.54 inch e-paper display.
+Example server mapping:
 
-The QR contains only data required to find and locally authorize access to this physical ESP32:
+```text
+relay 1 -> water
+relay 2 -> lighting
+relay 3 -> motor
+relay 4 -> auxiliary function
+```
+
+The same physical controller can be reassigned later from the admin panel without replacing the QR or reflashing ESP32.
+
+## Security layers
+
+The QR contains only:
 
 - `device_id`
 - BLE MAC address
 - local BLE access code
 
-The access code is **not a payment token** and does **not** grant paid operating time. Its only purpose is to allow the Flutter application that scanned the QR to authenticate to this ESP32 over BLE.
+The QR access code only opens local BLE access. It never authorizes paid operating time.
 
-Example QR:
+After successful payment the backend creates a one-time signed session authorization. The paid packet contains the selected `relay_channel`, and that field must be protected by the server token together with duration, payment id and session id.
 
-```text
-qroplate://connect?device=DEV-000001&mac=AA:BB:CC:DD:EE:FF&code=LOCAL_ACCESS_CODE
-```
-
-### 2. Payment
-
-After BLE authentication the Flutter app obtains the tariff for `device_id` from the server and performs payment.
-
-Only the backend may confirm that a payment is successful.
-
-After successful payment the backend creates a one-time signed session authorization token.
-
-### 3. Session packet sent from Flutter to ESP32
-
-Flutter sends the paid session data to ESP32 over BLE.
+## Paid session packet
 
 Target logical payload:
 
@@ -42,8 +39,9 @@ Target logical payload:
 {
   "version": 1,
   "device_id": "DEV-000001",
-  "payment_id": "pay_123456",
-  "session_id": "sess_123456",
+  "payment_id": "PAY-000123",
+  "session_id": "SES-000123",
+  "relay_channel": 3,
   "duration_sec": 900,
   "issued_at": 1789360000,
   "expires_at": 1789360120,
@@ -52,86 +50,32 @@ Target logical payload:
 }
 ```
 
-Meaning:
-
-- `device_id` - device for which payment was made
-- `payment_id` - payment identifier on the backend
-- `session_id` - unique operating session identifier
-- `duration_sec` - paid operating time
-- `issued_at` - token issue time
-- `expires_at` - latest time at which ESP32 may accept the start command
-- `nonce` - one-time value preventing replay
-- `token` - server-generated cryptographic authorization/signature
-
-ESP32 must not trust `duration_sec` by itself. The duration is accepted only if it is covered by a valid server token/signature.
-
-## Production start sequence
-
-```text
-User
-  |
-  | scans QR
-  v
-Flutter
-  |
-  | device_id + MAC + local access code
-  v
-ESP32 BLE
-  |
-  | AUTH local access code
-  v
-Flutter <-----> Backend
-  |               |
-  | tariff        |
-  | payment       |
-  |               |
-  |<-- signed paid session token
-  |
-  | BLE SESSION packet
-  v
-ESP32
-  |
-  | verify:
-  | - local BLE authentication already completed
-  | - device_id matches this ESP32
-  | - token/signature is valid
-  | - token has not expired
-  | - nonce/session has not already been used
-  | - duration is within allowed limits
-  v
-Relay ON
-  |
-  | DS3231 countdown
-  v
-Relay OFF
-```
-
-This means knowing the QR access code is not enough to start the equipment for free.
+Changing `relay_channel` or `duration_sec` must make token validation fail.
 
 ## Current firmware state
 
-The firmware already provides:
+The firmware currently provides:
 
-1. QR generation on the e-paper display.
+1. QR generation on the 1.54 inch e-paper display.
 2. BLE discovery and local AUTH by access code.
 3. Device INFO and STATUS characteristics.
 4. DS3231 based session timing.
-5. Relay control.
-6. Session end time stored in NVS so an active session survives ESP32 reboot.
-7. Remaining-time display while a session is running.
-8. Plain-duration BLE starts are disabled.
-9. PAYMENT/SESSION writes are routed through a dedicated token validator.
-10. The validator currently fails closed until cryptographic verification is configured.
-11. `SessionRequest` JSON model/parser is present for the paid-session packet.
+5. Four relay outputs.
+6. Selected relay channel stored in NVS with the active session end time.
+7. Active paid session restored after ESP32 reboot.
+8. Remaining-time display while a session is running.
+9. Plain-duration BLE starts disabled.
+10. PAYMENT/SESSION writes routed through a fail-closed token validator.
+11. `SessionRequest` parser with mandatory `relay_channel` 1..4.
 
-Therefore the current firmware cannot start a new paid session from an unverified BLE packet. This is intentional.
+Until server signature verification is configured, new paid session commands are rejected intentionally.
 
-## Hardware assumed
+## Hardware
 
 - MH-ET LIVE / ESP32 Dev Module
 - MH-ET LIVE 1.54 inch B/W e-paper, 200x200
 - DS3231 RTC module
-- relay module
+- 4-channel relay module or four separate relay modules
 
 ### Wiring
 
@@ -145,9 +89,58 @@ Therefore the current firmware cannot start a new paid session from an unverifie
 | E-paper | BUSY | 4 |
 | RTC DS3231 | SDA | 21 |
 | RTC DS3231 | SCL | 22 |
-| Relay | IN | 27 |
+| Relay 1 | IN1 | 25 |
+| Relay 2 | IN2 | 26 |
+| Relay 3 | IN3 | 27 |
+| Relay 4 | IN4 | 33 |
 
-Power and ground must be common. Check the relay module input voltage and whether it is active HIGH or active LOW before connecting a real load.
+All grounds must be common. Verify whether the relay board is active HIGH or active LOW and configure `RELAY_ACTIVE_LEVEL` / `RELAY_IDLE_LEVEL` accordingly. Do not power a relay coil bank from ESP32 3.3 V unless the relay module is explicitly designed for it.
+
+## Server-driven functions
+
+A device profile may expose one or more functions. Each function should include at least:
+
+```json
+{
+  "id": "FUNC-MOTOR",
+  "title": "Мотор",
+  "description": "Запуск двигателя",
+  "relay_channel": 3,
+  "image_url": "...",
+  "button_text": "Оплатить и запустить",
+  "tariffs": [
+    {
+      "id": "TARIFF-15",
+      "duration_sec": 900,
+      "price": 100.00,
+      "currency": "RUB"
+    }
+  ]
+}
+```
+
+Flutter renders the list/cards returned by the backend. The user chooses a function and tariff, pays, and receives a signed command authorizing exactly that relay channel for exactly the paid time.
+
+## Session behavior
+
+Current firmware permits one active paid session at a time per controller. The selected channel is restored after reboot and all non-selected relays are forced OFF.
+
+This is intentional for the first version because it gives predictable fail-safe behavior. If later one ESP32 must serve four customers simultaneously, the session manager can be expanded to four independent timers without changing the server concept.
+
+## BLE protocol
+
+Service UUID:
+
+`7a610000-71ce-4a7a-a9d8-6ad4bd36b000`
+
+| Characteristic | UUID suffix | Operation | Purpose |
+|---|---|---|---|
+| INFO | `0001` | Read | device id, BLE name, MAC, `relay_count=4` |
+| AUTH | `0002` | Write | local access code from QR |
+| PAYMENT/SESSION | `0003` | Write | signed paid-session packet |
+| STATUS | `0004` | Read/Notify | state, active relay channel and remaining seconds |
+
+STATUS includes `relay_channel` and `relay_count`.
 
 ## E-paper revision
 
@@ -156,11 +149,9 @@ Power and ground must be common. Check the relay module input voltage and whethe
 - `1` = `GxEPD2_154_D67`, SSD1681, 200x200
 - `2` = older `GxEPD2_154` / GDEP015OC1 compatible panel
 
-MH-ET LIVE sold more than one 1.54 inch revision. If the display stays white or shows garbage, switch `EPD_MODEL` and rebuild.
-
 ## Device provisioning
 
-Edit/provision for every physical device:
+Each physical controller must have its own:
 
 ```cpp
 #define DEVICE_ID "DEV-000001"
@@ -168,85 +159,9 @@ Edit/provision for every physical device:
 #define DEVICE_ACCESS_CODE "CHANGE_ME"
 ```
 
-For production:
-
-- every device gets its own unique `DEVICE_ID`
-- every device gets its own local BLE access code
-- payment verification material is provisioned separately
-- payment verification material is never included in the QR code
-
-## BLE protocol
-
-Service UUID:
-
-`7a610000-71ce-4a7a-a9d8-6ad4bd36b000`
-
-Characteristics:
-
-| Characteristic | UUID suffix | Operation | Production purpose |
-|---|---|---|---|
-| INFO | `0001` | Read | device id, BLE name and MAC |
-| AUTH | `0002` | Write | local access code from QR |
-| PAYMENT/SESSION | `0003` | Write | signed paid-session packet |
-| STATUS | `0004` | Read/Notify | state, session and remaining seconds |
-
-Characteristic `0003` no longer accepts a decimal duration as a start command. A server-approved session packet is required.
-
-## SessionRequest parser
-
-`include/session_request.h` and `src/session_request.cpp` define and parse:
-
-- protocol version
-- device id
-- payment/operation id
-- session id
-- duration
-- issue time
-- expiration time
-- nonce
-- server proof/token
-
-Malformed or incomplete JSON is rejected before authorization is attempted.
-
-## Session data stored by ESP32
-
-For production the ESP32 should keep at least:
-
-- active `session_id`
-- `payment_id`
-- accepted `nonce`
-- session start epoch
-- session end epoch
-- paid duration
-- current relay state
-
-The last accepted identifiers/nonces must be persisted sufficiently to prevent replay after reboot.
-
-## Status sent back to Flutter
-
-ESP32 reports operation data back to the phone through the STATUS characteristic. Target status includes:
-
-```json
-{
-  "device_id": "DEV-000001",
-  "connected": true,
-  "authenticated": true,
-  "rtc_ok": true,
-  "running": true,
-  "session_id": "sess_123456",
-  "payment_id": "pay_123456",
-  "duration_sec": 900,
-  "remaining_sec": 742,
-  "relay": true,
-  "event": "session_running"
-}
-```
-
-Flutter can forward session start/stop/result information to the backend for history and the admin panel.
+Payment verification material is provisioned separately and is never included in QR/BLE INFO.
 
 ## Build with PlatformIO
-
-Open the repository in VS Code + PlatformIO and run:
 
 ```bash
 pio run
@@ -254,20 +169,4 @@ pio run -t upload
 pio device monitor -b 115200
 ```
 
-The project currently targets `esp32dev`. If the exact MH-ET LIVE ESP32 board needs a different PlatformIO board id, change only the `board =` line in `platformio.ini`.
-
-Dependencies include GxEPD2, RTClib, QRCode and ArduinoJson.
-
-## RTC behavior
-
-On first boot after RTC battery loss, the firmware initializes DS3231 from firmware build time. Flutter/admin synchronization with trusted server time will be added for production.
-
-## Planned implementation order
-
-1. Connect `SessionRequest` parsing to the BLE PAYMENT/SESSION handler.
-2. Add cryptographic verification of the server-approved session package.
-3. Store `session_id`, `payment_id` and anti-replay nonce information in NVS.
-4. Extend BLE STATUS with complete session operation data.
-5. Flutter app: QR scanner, BLE authorization, backend API, payment and session UI.
-6. Laravel API/admin: devices, tariffs, locations, payments, sessions and provisioning.
-7. Device diagnostics and OTA update.
+The project targets `esp32dev` and uses GxEPD2, RTClib, QRCode and ArduinoJson.
