@@ -56,7 +56,7 @@ class ApiService {
     return _json(r);
   }
 
-  Future<void> sendTelemetry(String deviceId, BleStatus status) async {
+  Future<void> sendTelemetry(String deviceId, DeviceBleStatus status) async {
     final r = await client.post(
       _u('/devices/$deviceId/telemetry'),
       headers: {'Content-Type': 'application/json'},
