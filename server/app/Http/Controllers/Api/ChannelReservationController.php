@@ -41,7 +41,7 @@ class ChannelReservationController extends Controller
                 ->firstOrFail();
 
             $reservationId = 'RES-'.Str::upper(Str::random(20));
-            $reservedUntil = now()->addMinutes(2);
+            $reservedUntil = now()->addMinutes((int) config('qroplate.reservation_minutes', 2));
 
             $row->update([
                 'status' => 'reserved',
