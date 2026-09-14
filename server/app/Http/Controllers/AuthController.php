@@ -33,7 +33,7 @@ class AuthController extends Controller
                 'admin_id' => null,
                 'admin_name' => 'Супер администратор',
             ]);
-            return redirect()->route('admin.devices.index');
+            return redirect()->route('admin.dashboard');
         }
 
         $admin = Admin::where('login', $data['login'])->where('enabled', true)->first();
@@ -50,7 +50,7 @@ class AuthController extends Controller
             'admin_name' => $admin->name,
         ]);
 
-        return redirect()->route('admin.devices.index');
+        return redirect()->route('admin.dashboard');
     }
 
     public function logout(Request $request): RedirectResponse
