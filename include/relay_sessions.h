@@ -4,6 +4,8 @@
 
 bool relaySessionsBegin();
 void relaySessionsLoop();
+bool relaySessionsRtcOk();
+uint32_t relaySessionsCurrentEpoch();
 
 bool relayChannelActive(uint8_t channel);
 uint32_t relayChannelRemaining(uint8_t channel);
