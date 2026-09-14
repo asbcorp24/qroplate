@@ -5,7 +5,7 @@
 
 #include "config.h"
 #include "display_module.h"
-#include "session.h"
+#include "relay_sessions.h"
 
 #if EPD_MODEL == 1
 static GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> display(
@@ -83,30 +83,41 @@ void displayModuleShowQr(const String &payload) {
   lastRefreshMs = millis();
 }
 
-static void showRunning() {
+static void showChannels() {
   display.setFullWindow();
   display.firstPage();
   do {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
-    display.setTextSize(2);
-    centered("PAID", 45);
-    display.setTextSize(3);
-    centered(formatTime(sessionRemainingSeconds()), 110);
     display.setTextSize(1);
-    centered(String(DEVICE_ID), 165);
-    centered("RELAY ON", 188);
+    centered(String(DEVICE_ID), 14);
+    centered("ACTIVE CHANNELS", 30);
+
+    for (uint8_t ch = 1; ch <= RELAY_CHANNEL_COUNT; ++ch) {
+      const int16_t y = 62 + (ch - 1) * 32;
+      display.setCursor(12, y);
+      display.print("R");
+      display.print(ch);
+      display.print(" ");
+      if (relayChannelActive(ch)) {
+        display.print(formatTime(relayChannelRemaining(ch)));
+      } else {
+        display.print("FREE");
+      }
+    }
+
+    centered("SCAN QR FOR SERVICES", 194);
   } while (display.nextPage());
 
-  lastRunning = true;
+  lastRunning = relayActiveCount() > 0;
   lastRefreshMs = millis();
 }
 
 void displayModuleLoop() {
-  const bool running = sessionIsActive();
+  const bool running = relayActiveCount() > 0;
 
   if (running && (!lastRunning || millis() - lastRefreshMs >= DISPLAY_REFRESH_PERIOD_MS)) {
-    showRunning();
+    showChannels();
     return;
   }
 
