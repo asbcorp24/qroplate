@@ -7,6 +7,7 @@ struct SessionRequest {
   String deviceId;
   String operationId;
   String sessionId;
+  String tariffId;
   uint8_t relayChannel = 0;
   uint32_t durationSec = 0;
   uint32_t issuedAt = 0;
