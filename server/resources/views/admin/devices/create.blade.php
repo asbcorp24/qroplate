@@ -1,4 +1,5 @@
-@extends('admin.layout')
+@extends('layouts.admin')
+@section('title','Новый прибор — QROplate')
 @section('content')
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="mb-0">Новый прибор</h3>
