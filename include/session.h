@@ -5,6 +5,7 @@
 bool sessionBegin();
 bool sessionRtcOk();
 bool sessionIsActive();
+uint32_t sessionCurrentEpoch();
 uint32_t sessionRemainingSeconds();
 uint32_t sessionEndEpoch();
 bool sessionStart(uint32_t durationSeconds, const String &nonce);
