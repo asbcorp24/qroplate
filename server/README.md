@@ -2,8 +2,48 @@
 
 Backend/admin layer for QROplate.
 
+## Roles and authentication
+
+There are two roles.
+
+### Super administrator
+
+The super administrator is configured only through `.env` and is not stored in the database.
+
+```env
+SUPER_ADMIN_LOGIN=superadmin
+SUPER_ADMIN_PASSWORD=change_this_password
+```
+
+The super administrator:
+
+- signs in through `/login`
+- sees all devices from all administrators
+- can open the Administrators section
+- can create tenant administrators
+- can disable/enable tenant administrators
+- can reset their passwords
+
+### Administrator
+
+Tenant administrators are stored in the `admins` table. They are created by the super administrator.
+
+Each administrator:
+
+- has their own login/password
+- sees only devices with `owner_admin_id` equal to their admin id
+- can add their own devices
+- automatically becomes owner of a newly created device
+- manages only their own channels and tariffs
+- cannot open another administrator's device by direct URL
+
+Passwords of tenant administrators are stored as Laravel password hashes, never as plain text.
+
 ## What is implemented
 
+- Super-admin login from `.env`
+- Database tenant administrators
+- Per-admin device ownership
 - Devices
 - 4 independent channels per ESP32
 - Channel state: `free`, `reserved`, `running`, `error`, `disabled`
@@ -19,14 +59,12 @@ Backend/admin layer for QROplate.
 
 This `server/` directory contains the QROplate application layer. Create a clean Laravel 9 application and place/copy these files into it, or use this directory as the project root after installing the standard Laravel 9 skeleton.
 
-Example:
-
 ```bash
 composer create-project laravel/laravel qroplate-server "9.*"
 cd qroplate-server
 ```
 
-Copy the contents of this repository `server/` directory over the new Laravel project, then run:
+Copy the contents of this repository `server/` directory over the Laravel project, then run:
 
 ```bash
 composer install
@@ -34,7 +72,7 @@ cp .env.example .env
 php artisan key:generate
 ```
 
-Configure the database in `.env`, for example MySQL:
+Configure database and super administrator in `.env`:
 
 ```env
 DB_CONNECTION=mysql
@@ -43,6 +81,9 @@ DB_PORT=3306
 DB_DATABASE=qroplate
 DB_USERNAME=qroplate
 DB_PASSWORD=change_me
+
+SUPER_ADMIN_LOGIN=superadmin
+SUPER_ADMIN_PASSWORD=change_this_password
 ```
 
 Then:
@@ -52,16 +93,22 @@ php artisan migrate --seed
 php artisan serve
 ```
 
-Admin:
+Login:
+
+```text
+http://127.0.0.1:8000/login
+```
+
+Admin devices:
 
 ```text
 http://127.0.0.1:8000/admin/devices
 ```
 
-Initial seeded device:
+Super-admin administrators section:
 
 ```text
-DEV-000001
+http://127.0.0.1:8000/admin/admins
 ```
 
 ## Main API
@@ -87,36 +134,12 @@ Content-Type: application/json
 
 The row is locked in a database transaction. If the channel is not free the server returns HTTP 409 with `channel_busy`.
 
-A reservation currently expires after 2 minutes.
-
 ### Synchronize actual ESP32 state
 
-Flutter reads BLE STATUS from ESP32 and forwards it:
+Flutter reads BLE STATUS from ESP32 and forwards it to:
 
 ```http
 POST /api/devices/DEV-000001/telemetry
-Content-Type: application/json
-
-{
-  "channels": [
-    {
-      "channel": 1,
-      "running": true,
-      "remaining_sec": 522,
-      "end_epoch": 1789360900,
-      "session_id": "SES-001",
-      "payment_id": "PAY-001"
-    },
-    {
-      "channel": 2,
-      "running": false,
-      "remaining_sec": 0,
-      "end_epoch": 0,
-      "session_id": "",
-      "payment_id": ""
-    }
-  ]
-}
 ```
 
 ## Availability model
@@ -144,6 +167,5 @@ Because ESP32 has BLE only, Flutter acts as the transport for real device teleme
 - Payment-provider integration/webhooks
 - Endpoint that converts a paid reservation into a signed ESP32 session command
 - API authentication/rate limiting
-- Admin authentication
 - Payments/sessions admin pages and reports
 - Background cleanup for expired reservations
