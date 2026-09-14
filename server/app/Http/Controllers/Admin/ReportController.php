@@ -9,24 +9,28 @@ use App\Models\DeviceSession;
 use App\Models\Payment;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
-    public function index(Request $request)
+    private function buildData(Request $request): array
     {
         $isSuper = $request->session()->get('admin_role') === 'super';
         $adminId = (int) $request->session()->get('admin_id');
 
         $deviceQuery = Device::query()->when(!$isSuper, fn($q) => $q->where('owner_admin_id', $adminId));
+        if ($isSuper && $request->filled('admin_id')) {
+            $deviceQuery->where('owner_admin_id', (int) $request->admin_id);
+        }
+        if ($request->filled('device_id')) {
+            $deviceQuery->whereKey((int) $request->device_id);
+        }
         $devices = $deviceQuery->orderBy('name')->get();
         $deviceIds = $devices->pluck('id');
 
-        $payments = Payment::query()
-            ->with(['channel.device'])
+        $payments = Payment::query()->with(['channel.device'])
             ->whereHas('channel', fn(Builder $q) => $q->whereIn('device_id_fk', $deviceIds));
-
-        $sessions = DeviceSession::query()
-            ->with(['channel.device'])
+        $sessions = DeviceSession::query()->with(['channel.device'])
             ->whereHas('channel', fn(Builder $q) => $q->whereIn('device_id_fk', $deviceIds));
 
         if ($request->filled('date_from')) {
@@ -37,20 +41,10 @@ class ReportController extends Controller
             $payments->whereDate('created_at', '<=', $request->date_to);
             $sessions->whereDate('created_at', '<=', $request->date_to);
         }
-        if ($request->filled('device_id')) {
-            $deviceId = (int) $request->device_id;
-            $payments->whereHas('channel', fn(Builder $q) => $q->where('device_id_fk', $deviceId));
-            $sessions->whereHas('channel', fn(Builder $q) => $q->where('device_id_fk', $deviceId));
-        }
         if ($request->filled('channel')) {
             $channel = (int) $request->channel;
             $payments->whereHas('channel', fn(Builder $q) => $q->where('channel', $channel));
             $sessions->whereHas('channel', fn(Builder $q) => $q->where('channel', $channel));
-        }
-        if ($isSuper && $request->filled('admin_id')) {
-            $filterAdminId = (int) $request->admin_id;
-            $payments->whereHas('channel.device', fn(Builder $q) => $q->where('owner_admin_id', $filterAdminId));
-            $sessions->whereHas('channel.device', fn(Builder $q) => $q->where('owner_admin_id', $filterAdminId));
         }
 
         $paidPayments = (clone $payments)->where('status', 'paid')->get();
@@ -77,7 +71,45 @@ class ReportController extends Controller
             ];
         })->filter(fn($row) => $row['payments'] || $row['sessions']);
 
-        $admins = $isSuper ? Admin::orderBy('name')->get() : collect();
-        return view('admin.reports.index', compact('summary','rows','devices','admins','isSuper'));
+        return compact('isSuper','devices','summary','rows');
+    }
+
+    public function index(Request $request)
+    {
+        $data = $this->buildData($request);
+        $data['admins'] = $data['isSuper'] ? Admin::orderBy('name')->get() : collect();
+        return view('admin.reports.index', $data);
+    }
+
+    public function csv(Request $request): StreamedResponse
+    {
+        $data = $this->buildData($request);
+        $summary = $data['summary'];
+        $rows = $data['rows'];
+
+        return response()->streamDownload(function () use ($summary, $rows) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, ['Показатель','Значение'], ';');
+            fputcsv($out, ['Оборот', $summary['revenue']], ';');
+            fputcsv($out, ['Оплаченных платежей', $summary['payments']], ';');
+            fputcsv($out, ['Сессий', $summary['sessions']], ';');
+            fputcsv($out, ['Активных сессий', $summary['running']], ';');
+            fputcsv($out, ['Завершённых сессий', $summary['finished']], ';');
+            fputcsv($out, ['Оплачено секунд', $summary['duration_sec']], ';');
+            fputcsv($out, [], ';');
+            fputcsv($out, ['Device ID','Прибор','Оборот','Платежи','Сессии','Оплачено секунд'], ';');
+            foreach ($rows as $row) {
+                fputcsv($out, [
+                    $row['device']->device_id,
+                    $row['device']->name,
+                    $row['revenue'],
+                    $row['payments'],
+                    $row['sessions'],
+                    $row['duration_sec'],
+                ], ';');
+            }
+            fclose($out);
+        }, 'report_' . now()->format('Ymd_His') . '.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 }
