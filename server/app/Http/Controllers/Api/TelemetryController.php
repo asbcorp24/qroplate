@@ -40,23 +40,59 @@ class TelemetryController extends Controller
                     ? \Carbon\Carbon::createFromTimestampUTC($endEpoch)
                     : null;
 
+                $previousSessionId = $channel->current_session_id;
+                $reportedSessionId = (string)($reported['session_id'] ?? '');
+                $reportedPaymentId = (string)($reported['payment_id'] ?? '');
+
+                if ($running) {
+                    $channel->update([
+                        'status' => 'running',
+                        'current_session_id' => $reportedSessionId !== '' ? $reportedSessionId : $channel->current_session_id,
+                        'current_payment_id' => $reportedPaymentId !== '' ? $reportedPaymentId : $channel->current_payment_id,
+                        'reserved_until' => null,
+                        'occupied_until' => $occupiedUntil,
+                        'last_device_report_at' => now(),
+                    ]);
+
+                    $sessionId = $reportedSessionId !== '' ? $reportedSessionId : $previousSessionId;
+                    if ($sessionId) {
+                        $session = DeviceSession::where('session_id', $sessionId)->first();
+                        if ($session) {
+                            $session->update([
+                                'status' => 'running',
+                                'started_at' => $session->started_at ?: now(),
+                                'ends_at' => $occupiedUntil ?: $session->ends_at,
+                                'finished_at' => null,
+                                'last_device_status' => $reported,
+                            ]);
+                        }
+                    }
+                    continue;
+                }
+
+                // ESP reports only physical relay state. A valid server-side reservation
+                // must not be erased simply because its relay has not started yet.
+                if ($channel->status === 'reserved' && $channel->reserved_until && $channel->reserved_until->isFuture()) {
+                    $channel->update(['last_device_report_at' => now()]);
+                    continue;
+                }
+
                 $channel->update([
-                    'status' => $running ? 'running' : 'free',
-                    'current_session_id' => $running ? ($reported['session_id'] ?? $channel->current_session_id) : null,
-                    'current_payment_id' => $running ? ($reported['payment_id'] ?? $channel->current_payment_id) : null,
+                    'status' => 'free',
+                    'current_session_id' => null,
+                    'current_payment_id' => null,
                     'reserved_until' => null,
-                    'occupied_until' => $occupiedUntil,
+                    'occupied_until' => null,
                     'last_device_report_at' => now(),
                 ]);
 
-                if (!empty($reported['session_id'])) {
-                    $session = DeviceSession::where('session_id', $reported['session_id'])->first();
-                    if ($session) {
+                $sessionId = $reportedSessionId !== '' ? $reportedSessionId : $previousSessionId;
+                if ($sessionId && !str_starts_with($sessionId, 'RES-')) {
+                    $session = DeviceSession::where('session_id', $sessionId)->first();
+                    if ($session && $session->status === 'running') {
                         $session->update([
-                            'status' => $running ? 'running' : 'finished',
-                            'started_at' => $running ? ($session->started_at ?: now()) : $session->started_at,
-                            'ends_at' => $occupiedUntil ?: $session->ends_at,
-                            'finished_at' => $running ? null : now(),
+                            'status' => 'finished',
+                            'finished_at' => now(),
                             'last_device_status' => $reported,
                         ]);
                     }
