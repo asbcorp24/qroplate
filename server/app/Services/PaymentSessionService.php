@@ -30,10 +30,13 @@ class PaymentSessionService
                 'status' => 'paid',
             ]);
 
+            $holdSeconds = max(180, (int) config('qroplate.session_command_ttl_seconds', 120) + 60);
             $payment->channel->update([
                 'status' => 'reserved',
                 'current_payment_id' => $payment->payment_id,
                 'current_session_id' => $session->session_id,
+                'reserved_until' => now()->addSeconds($holdSeconds),
+                'occupied_until' => null,
             ]);
 
             return $session;
