@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\DeviceController;
+use App\Http\Controllers\Admin\PaymentController;
+use App\Http\Controllers\Admin\ReportController;
+use App\Http\Controllers\Admin\SessionController;
 use App\Http\Controllers\Admin\UserAdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Middleware\AdminSessionAuth;
@@ -23,6 +26,14 @@ Route::middleware(AdminSessionAuth::class)->prefix('admin')->name('admin.')->gro
     Route::put('/devices/{device}', [DeviceController::class, 'update'])->name('devices.update');
     Route::put('/devices/{device}/channels/{channel}', [DeviceController::class, 'updateChannel'])->name('devices.channels.update');
     Route::post('/devices/{device}/channels/{channel}/tariffs', [DeviceController::class, 'storeTariff'])->name('devices.channels.tariffs.store');
+
+    Route::get('/payments', [PaymentController::class, 'index'])->name('payments.index');
+    Route::get('/payments.csv', [PaymentController::class, 'csv'])->name('payments.csv');
+
+    Route::get('/sessions', [SessionController::class, 'index'])->name('sessions.index');
+    Route::get('/sessions.csv', [SessionController::class, 'csv'])->name('sessions.csv');
+
+    Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
 
     Route::get('/admins', [UserAdminController::class, 'index'])->name('admins.index');
     Route::post('/admins', [UserAdminController::class, 'store'])->name('admins.store');
