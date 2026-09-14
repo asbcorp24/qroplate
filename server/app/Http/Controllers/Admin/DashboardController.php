@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Admin;
 use App\Models\Device;
 use App\Models\DeviceChannel;
+use App\Services\DashboardStats;
 use Illuminate\View\View;
 
 class DashboardController extends Controller
@@ -28,12 +29,14 @@ class DashboardController extends Controller
             if (isset($statusCounts[$status])) $statusCounts[$status]++;
         }
 
-        return view('admin.dashboard', [
+        $stats = DashboardStats::forChannels($channels->pluck('id'));
+
+        return view('admin.dashboard', array_merge($stats, [
             'isSuper' => $isSuper,
             'adminCount' => $isSuper ? Admin::count() : null,
             'deviceCount' => $devices->count(),
             'channelCount' => $channels->count(),
             'statusCounts' => $statusCounts,
-        ]);
+        ]));
     }
 }
