@@ -47,6 +47,14 @@ static uint32_t nowEpoch() {
   return rtcOk() ? rtc.now().unixtime() : 0;
 }
 
+bool relaySessionsRtcOk() {
+  return rtcOk();
+}
+
+uint32_t relaySessionsCurrentEpoch() {
+  return nowEpoch();
+}
+
 static void saveChannel(uint8_t channel) {
   const ChannelState &s = states[idx(channel)];
   prefs.putUInt(key(channel, "end").c_str(), s.endEpoch);
