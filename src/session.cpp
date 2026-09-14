@@ -20,6 +20,11 @@ bool sessionRtcOk() {
   return rtcPresent && !rtc.lostPower();
 }
 
+uint32_t sessionCurrentEpoch() {
+  if (!sessionRtcOk()) return 0;
+  return rtc.now().unixtime();
+}
+
 uint32_t sessionEndEpoch() {
   return endEpoch;
 }
