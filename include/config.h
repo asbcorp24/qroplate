@@ -7,9 +7,15 @@
 #define BLE_DEVICE_NAME "QRPAY-000001"
 #define DEVICE_ACCESS_CODE "CHANGE_ME"
 
-// Per-device signing material used only to verify server-issued payment tokens.
-// Replace during provisioning; never expose it through QR/BLE/application UI.
+// Shared HMAC key used to verify server-issued payment tokens.
+// Replace during provisioning and keep identical to Laravel DEVICE_TOKEN_SECRET.
 #define DEVICE_TOKEN_KEY "REPLACE_DURING_PROVISIONING"
+
+// Temporary bench mode: allows paid timers to run without DS3231.
+// In this mode timers use millis(), active sessions are NOT restored after reboot,
+// and Unix issued_at/expires_at cannot be checked by the ESP32.
+// Set to 0 before production once DS3231 is installed.
+#define ALLOW_NO_RTC_TEST_MODE 1
 
 // MH-ET LIVE ESP32 / generic ESP32 Dev Module
 #define EPD_CS_PIN    5
