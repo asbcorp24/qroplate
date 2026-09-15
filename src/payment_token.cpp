@@ -90,24 +90,36 @@ bool paymentTokenAccept(const String &package, String &result) {
     result = "wrong_device";
     return false;
   }
-  if (!relaySessionsRtcOk()) {
-    result = "rtc_not_ready";
-    return false;
-  }
+
   if (r.durationSec == 0 || r.durationSec > MAX_SESSION_SECONDS) {
     result = "bad_duration";
     return false;
   }
 
-  const uint32_t now = relaySessionsCurrentEpoch();
-  if (r.issuedAt > now + TOKEN_CLOCK_SKEW_SECONDS) {
-    result = "issued_in_future";
+  if (r.expiresAt <= r.issuedAt) {
+    result = "bad_token_window";
     return false;
   }
-  if (r.expiresAt + TOKEN_CLOCK_SKEW_SECONDS < now || r.expiresAt <= r.issuedAt) {
-    result = "token_expired";
+
+  if (relaySessionsRtcOk()) {
+    const uint32_t now = relaySessionsCurrentEpoch();
+    if (r.issuedAt > now + TOKEN_CLOCK_SKEW_SECONDS) {
+      result = "issued_in_future";
+      return false;
+    }
+    if (r.expiresAt + TOKEN_CLOCK_SKEW_SECONDS < now) {
+      result = "token_expired";
+      return false;
+    }
+  } else {
+#if ALLOW_NO_RTC_TEST_MODE
+    Serial.println("WARN AUTH: no RTC, Unix token window check skipped");
+#else
+    result = "rtc_not_ready";
     return false;
+#endif
   }
+
   if (relayChannelActive(r.relayChannel)) {
     result = "channel_busy";
     return false;
