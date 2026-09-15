@@ -36,9 +36,17 @@ class TelemetryController extends Controller
 
                 $running = (bool)$reported['running'];
                 $endEpoch = (int)($reported['end_epoch'] ?? 0);
-                $occupiedUntil = $running && $endEpoch > 0
-                    ? \Carbon\Carbon::createFromTimestampUTC($endEpoch)
-                    : null;
+                $remainingSec = (int)($reported['remaining_sec'] ?? 0);
+
+                $occupiedUntil = null;
+                if ($running) {
+                    if ($endEpoch > 0) {
+                        $occupiedUntil = \Carbon\Carbon::createFromTimestampUTC($endEpoch);
+                    } elseif ($remainingSec > 0) {
+                        // No-RTC ESP32 bench mode reports remaining seconds but no Unix end epoch.
+                        $occupiedUntil = now()->addSeconds($remainingSec);
+                    }
+                }
 
                 $previousSessionId = $channel->current_session_id;
                 $reportedSessionId = (string)($reported['session_id'] ?? '');
